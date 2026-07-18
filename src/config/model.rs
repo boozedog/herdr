@@ -885,6 +885,9 @@ pub struct ExperimentalConfig {
     pub kitty_graphics: bool,
     /// Persist pane screen history to session-history.json. Default: false.
     pub pane_history: bool,
+    /// When true, Agents panel lists only agents in the active worktree space
+    /// (or the active workspace if it has no space). Default: false.
+    pub agent_panel_space_scope: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`, so macOS native input methods keep tracking
     /// the candidate window when TUIs paint their own cursor (Claude Code, pi,
@@ -1691,6 +1694,29 @@ pane_history = true
     }
 
     #[test]
+    fn agent_panel_space_scope_default_off_and_parse() {
+        assert!(!Config::default().experimental.agent_panel_space_scope);
+
+        let enabled: Config = toml::from_str(
+            r#"
+[experimental]
+agent_panel_space_scope = true
+"#,
+        )
+        .unwrap();
+        assert!(enabled.experimental.agent_panel_space_scope);
+
+        let disabled: Config = toml::from_str(
+            r#"
+[experimental]
+agent_panel_space_scope = false
+"#,
+        )
+        .unwrap();
+        assert!(!disabled.experimental.agent_panel_space_scope);
+    }
+
+    #[test]
     fn kitty_graphics_default_off_and_parse() {
         let config = Config::default();
         assert!(!config.experimental.kitty_graphics);
@@ -1710,12 +1736,14 @@ kitty_graphics = true
 allow_nested = true
 kitty_graphics = true
 pane_history = true
+agent_panel_space_scope = true
 switch_ascii_input_source_in_prefix = true
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.experimental.allow_nested);
         assert!(config.experimental.kitty_graphics);
         assert!(config.experimental.pane_history);
+        assert!(config.experimental.agent_panel_space_scope);
         assert!(config.experimental.switch_ascii_input_source_in_prefix);
     }
 

@@ -1084,6 +1084,12 @@
           "description": "Persist pane screen history to session-history.json."
         },
         {
+          "key": "experimental.agent_panel_space_scope",
+          "type": "boolean",
+          "default": "false",
+          "description": "When true, Agents panel lists only agents in the active worktree space (or the active workspace if it has no space)."
+        },
+        {
           "key": "experimental.reveal_hidden_cursor_for_cjk_ime",
           "type": "boolean",
           "default": "false",

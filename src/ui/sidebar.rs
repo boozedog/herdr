@@ -110,6 +110,23 @@ pub(crate) fn agent_panel_entries_from(
     agent_panel_entries_with_runtimes(app, Some(terminal_runtimes))
 }
 
+enum PanelScopeMatch<'a> {
+    SpaceKey(&'a str),
+    WorkspaceIdx(usize),
+}
+
+fn agent_panel_space_scope_match(app: &AppState) -> Option<PanelScopeMatch<'_>> {
+    if !app.agent_panel_space_scope {
+        return None;
+    }
+    let idx = app.active?;
+    let ws = app.workspaces.get(idx)?;
+    Some(match ws.worktree_space() {
+        Some(space) => PanelScopeMatch::SpaceKey(space.key.as_str()),
+        None => PanelScopeMatch::WorkspaceIdx(idx),
+    })
+}
+
 fn agent_panel_entries_with_runtimes(
     app: &AppState,
     terminal_runtimes: Option<&TerminalRuntimeRegistry>,
@@ -123,10 +140,19 @@ fn agent_panel_entries_with_runtimes(
         }
     };
 
+    let scope_match = agent_panel_space_scope_match(app);
+
     let mut entries: Vec<_> = app
         .workspaces
         .iter()
         .enumerate()
+        .filter(|(ws_idx, ws)| match scope_match {
+            None => true,
+            Some(PanelScopeMatch::SpaceKey(key)) => {
+                ws.worktree_space().is_some_and(|s| s.key == key)
+            }
+            Some(PanelScopeMatch::WorkspaceIdx(idx)) => *ws_idx == idx,
+        })
         .flat_map(|(ws_idx, ws)| {
             let multi_tab = ws.tabs.len() > 1;
             let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
@@ -2632,5 +2658,143 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 },
             ]
         );
+    }
+
+    fn mark_workspace_agent(app: &mut AppState, ws_idx: usize, state: AgentState, change_seq: u64) {
+        let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+        let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Claude);
+        terminal.state = state;
+        terminal.last_agent_state_change_seq = Some(change_seq);
+    }
+
+    fn entry_labels(app: &AppState) -> Vec<String> {
+        agent_panel_entries(app)
+            .into_iter()
+            .map(|entry| entry.primary_label)
+            .collect()
+    }
+
+    #[test]
+    fn agent_panel_space_scope_off_keeps_all_agents() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space("issue", Some("repo-a"), "/repo/a-issue"),
+            Workspace::test_new("notes"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.agent_panel_space_scope = false;
+        for ws_idx in 0..app.workspaces.len() {
+            mark_workspace_agent(&mut app, ws_idx, AgentState::Working, ws_idx as u64);
+        }
+
+        assert_eq!(entry_labels(&app), ["main", "issue", "notes"]);
+    }
+
+    #[test]
+    fn agent_panel_space_scope_solo_workspace_keeps_only_active() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("one"),
+            Workspace::test_new("two"),
+            Workspace::test_new("three"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(1);
+        app.agent_panel_space_scope = true;
+        for ws_idx in 0..app.workspaces.len() {
+            mark_workspace_agent(&mut app, ws_idx, AgentState::Working, ws_idx as u64);
+        }
+
+        assert_eq!(entry_labels(&app), ["two"]);
+    }
+
+    #[test]
+    fn agent_panel_space_scope_shared_space_keeps_space_members() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space("issue", Some("repo-a"), "/repo/a-issue"),
+            workspace_with_worktree_space("other", Some("repo-b"), "/repo/b"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.agent_panel_space_scope = true;
+        for ws_idx in 0..app.workspaces.len() {
+            mark_workspace_agent(&mut app, ws_idx, AgentState::Working, ws_idx as u64);
+        }
+
+        assert_eq!(entry_labels(&app), ["main", "issue"]);
+
+        app.active = Some(1);
+        assert_eq!(entry_labels(&app), ["main", "issue"]);
+    }
+
+    #[test]
+    fn agent_panel_space_scope_follows_active_space() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space("issue", Some("repo-a"), "/repo/a-issue"),
+            workspace_with_worktree_space("other", Some("repo-b"), "/repo/b"),
+            workspace_with_worktree_space("review", Some("repo-b"), "/repo/b-review"),
+        ];
+        app.ensure_test_terminals();
+        app.agent_panel_space_scope = true;
+        for ws_idx in 0..app.workspaces.len() {
+            mark_workspace_agent(&mut app, ws_idx, AgentState::Working, ws_idx as u64);
+        }
+
+        app.active = Some(0);
+        assert_eq!(entry_labels(&app), ["main", "issue"]);
+
+        app.active = Some(2);
+        assert_eq!(entry_labels(&app), ["other", "review"]);
+    }
+
+    #[test]
+    fn agent_panel_space_scope_filters_before_priority_sort() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space("issue", Some("repo-a"), "/repo/a-issue"),
+            workspace_with_worktree_space("other", Some("repo-b"), "/repo/b"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.agent_panel_space_scope = true;
+        app.agent_panel_sort = AgentPanelSort::Priority;
+
+        // Higher attention in the other space must not appear when scope is on.
+        mark_workspace_agent(&mut app, 0, AgentState::Working, 1);
+        mark_workspace_agent(&mut app, 1, AgentState::Idle, 2);
+        mark_workspace_agent(&mut app, 2, AgentState::Blocked, 99);
+
+        let labels = entry_labels(&app);
+        assert_eq!(labels, ["main", "issue"]);
+        assert!(!labels.iter().any(|label| label == "other"));
+    }
+
+    #[test]
+    fn agent_panel_space_scope_active_none_shows_all() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space("issue", Some("repo-a"), "/repo/a-issue"),
+            Workspace::test_new("notes"),
+        ];
+        app.ensure_test_terminals();
+        app.active = None;
+        app.agent_panel_space_scope = true;
+        for ws_idx in 0..app.workspaces.len() {
+            mark_workspace_agent(&mut app, ws_idx, AgentState::Working, ws_idx as u64);
+        }
+
+        assert_eq!(entry_labels(&app), ["main", "issue", "notes"]);
     }
 }

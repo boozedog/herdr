@@ -396,6 +396,17 @@ claude = "on"
 
 Search the [Config reference](/docs/config-reference/) for scrollback limits, nested launches, and other advanced or experimental settings. See [Session state and restore](/docs/session-state/) before enabling pane screen history; that guide explains the security trade-off of saving pane contents.
 
+## Agent panel space scope
+
+When enabled, the Agents panel lists only agents that belong to the currently active worktree space. If the active workspace is not part of a worktree space, only that workspace's agents appear. Disabled by default; edit config and reload to toggle:
+
+```toml
+[experimental]
+agent_panel_space_scope = true
+```
+
+The existing grouped / priority sort chip still applies to the filtered list. There is no Settings UI or scope chip for this experiment.
+
 ## Kitty graphics
 
 Kitty graphics rendering for attached local clients is experimental and disabled by default:

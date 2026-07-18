@@ -607,6 +607,7 @@ impl App {
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
             sidebar_section_split,
             agent_panel_sort,
+            agent_panel_space_scope: config.experimental.agent_panel_space_scope,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,
@@ -1451,6 +1452,7 @@ impl App {
                 config.experimental.switch_ascii_input_source_in_prefix;
             self.persist_pane_history = config.experimental.pane_history;
             self.state.pane_history_persistence = config.experimental.pane_history;
+            self.state.agent_panel_space_scope = config.experimental.agent_panel_space_scope;
             if !self.persist_pane_history {
                 crate::persist::clear_history();
             }
@@ -2367,6 +2369,54 @@ mod tests {
         let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
 
         assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
+    }
+
+    #[test]
+    fn startup_uses_configured_agent_panel_space_scope() {
+        let mut config = Config::default();
+        config.experimental.agent_panel_space_scope = true;
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+
+        assert!(app.state.agent_panel_space_scope);
+    }
+
+    #[test]
+    fn reload_config_toggles_agent_panel_space_scope() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-agent-panel-space-scope");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "onboarding = false\n[experimental]\nagent_panel_space_scope = false\n",
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        assert!(!app.state.agent_panel_space_scope);
+
+        std::fs::write(
+            &path,
+            "onboarding = false\n[experimental]\nagent_panel_space_scope = true\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(app.state.agent_panel_space_scope);
+
+        std::fs::write(
+            &path,
+            "onboarding = false\n[experimental]\nagent_panel_space_scope = false\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(!app.state.agent_panel_space_scope);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

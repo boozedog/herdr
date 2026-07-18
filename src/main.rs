@@ -395,6 +395,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # kitty_graphics = false
 # Save recent pane screen history across full server restarts.
 pane_history = false
+# When true, Agents panel only includes agents in the active worktree space.
+# Without a worktree space, only the active workspace. Default: false.
+# agent_panel_space_scope = false
 # While prefix mode is active, temporarily switch the macOS host input
 # source to an ASCII-capable keyboard layout so prefix commands register
 # even when a CJK IME is active, then restore the previous input source
