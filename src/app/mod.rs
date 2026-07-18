@@ -2371,15 +2371,62 @@ mod tests {
         assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
     }
 
+    fn workspace_with_worktree_space_for_panel(
+        name: &str,
+        key: Option<&str>,
+        checkout_key: &str,
+    ) -> crate::workspace::Workspace {
+        let mut ws = crate::workspace::Workspace::test_new(name);
+        if let Some(key) = key {
+            ws.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+                key: key.into(),
+                label: "herdr".into(),
+                repo_root: std::path::PathBuf::from("/repo/herdr"),
+                checkout_path: std::path::PathBuf::from(checkout_key),
+                is_linked_worktree: name != "main",
+            });
+        }
+        ws
+    }
+
+    fn seed_multi_space_agent_panel(state: &mut state::AppState) {
+        state.workspaces = vec![
+            workspace_with_worktree_space_for_panel("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space_for_panel("issue", Some("repo-a"), "/repo/a-issue"),
+            workspace_with_worktree_space_for_panel("other", Some("repo-b"), "/repo/b"),
+        ];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        for ws_idx in 0..state.workspaces.len() {
+            let pane = state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = state.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = crate::detect::AgentState::Working;
+        }
+    }
+
+    fn agent_panel_labels(state: &state::AppState) -> Vec<String> {
+        crate::ui::agent_panel_entries(state)
+            .into_iter()
+            .map(|entry| entry.primary_label)
+            .collect()
+    }
+
     #[test]
     fn startup_uses_configured_agent_panel_space_scope() {
         let mut config = Config::default();
         config.experimental.agent_panel_space_scope = true;
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+        let mut app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
 
         assert!(app.state.agent_panel_space_scope);
+        seed_multi_space_agent_panel(&mut app.state);
+        // Startup with true → entries filtered to active space members only.
+        assert_eq!(agent_panel_labels(&app.state), ["main", "issue"]);
     }
 
     #[test]
@@ -2396,6 +2443,12 @@ mod tests {
 
         let mut app = test_app();
         assert!(!app.state.agent_panel_space_scope);
+        seed_multi_space_agent_panel(&mut app.state);
+        assert_eq!(
+            agent_panel_labels(&app.state),
+            ["main", "issue", "other"],
+            "flag off must list all agents"
+        );
 
         std::fs::write(
             &path,
@@ -2405,6 +2458,11 @@ mod tests {
         let report = app.reload_config();
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
         assert!(app.state.agent_panel_space_scope);
+        assert_eq!(
+            agent_panel_labels(&app.state),
+            ["main", "issue"],
+            "reload false→true must engage filter"
+        );
 
         std::fs::write(
             &path,
@@ -2414,6 +2472,11 @@ mod tests {
         let report = app.reload_config();
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
         assert!(!app.state.agent_panel_space_scope);
+        assert_eq!(
+            agent_panel_labels(&app.state),
+            ["main", "issue", "other"],
+            "reload true→false must restore full list"
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

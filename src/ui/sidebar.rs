@@ -2771,13 +2771,39 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.agent_panel_sort = AgentPanelSort::Priority;
 
         // Higher attention in the other space must not appear when scope is on.
+        // Within the active space, blocked "issue" outranks working "main".
         mark_workspace_agent(&mut app, 0, AgentState::Working, 1);
-        mark_workspace_agent(&mut app, 1, AgentState::Idle, 2);
+        mark_workspace_agent(&mut app, 1, AgentState::Blocked, 2);
         mark_workspace_agent(&mut app, 2, AgentState::Blocked, 99);
 
         let labels = entry_labels(&app);
-        assert_eq!(labels, ["main", "issue"]);
+        assert_eq!(labels, ["issue", "main"]);
         assert!(!labels.iter().any(|label| label == "other"));
+    }
+
+    #[test]
+    fn agent_panel_space_scope_follows_active_not_selected() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-a"), "/repo/a"),
+            workspace_with_worktree_space("issue", Some("repo-a"), "/repo/a-issue"),
+            workspace_with_worktree_space("other", Some("repo-b"), "/repo/b"),
+            workspace_with_worktree_space("review", Some("repo-b"), "/repo/b-review"),
+        ];
+        app.ensure_test_terminals();
+        app.agent_panel_space_scope = true;
+        for ws_idx in 0..app.workspaces.len() {
+            mark_workspace_agent(&mut app, ws_idx, AgentState::Working, ws_idx as u64);
+        }
+
+        // Active space A; navigate highlight on space B must not change the list.
+        app.active = Some(0);
+        app.selected = 2;
+        assert_eq!(entry_labels(&app), ["main", "issue"]);
+
+        app.active = Some(2);
+        app.selected = 0;
+        assert_eq!(entry_labels(&app), ["other", "review"]);
     }
 
     #[test]
